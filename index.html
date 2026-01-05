@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eternal Heart Hologram</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <!-- Import Map -->
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "three": "https://esm.sh/three@0.160.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.12?external=react,react-dom,three",
+    "lucide-react": "https://esm.sh/lucide-react@0.300.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      body { margin: 0; background-color: #000; overflow: hidden; }
+      canvas { touch-action: none; }
+      ::-webkit-scrollbar { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+      import React, { useRef, useState, useMemo, useEffect } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { Canvas, useFrame, useThree } from '@react-three/fiber';
+      import * as THREE from 'three';
+      import { Music, Maximize, AlertTriangle } from 'lucide-react';
+
+      // --- 1. Texture Utilities ---
+      function createParticleTexture(type) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) return new THREE.Texture();
+
+        if (type === 'shard') {
+          // Sharp diamond
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.moveTo(32, 2);
+          ctx.lineTo(40, 24);
+          ctx.lineTo(62, 32);
+          ctx.lineTo(40, 40);
+          ctx.lineTo(32, 62);
+          ctx.lineTo(24, 40);
+          ctx.lineTo(2, 32);
+          ctx.lineTo(24, 24);
+          ctx.closePath();
+          ctx.fill();
+          const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 20);
+          g.addColorStop(0, 'rgba(255,255,255,1)');
+          g.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = g;
+          ctx.fill();
+        } else if (type === 'glow') {
+          const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+          g.addColorStop(0, 'rgba(255,255,255,1)');
+          g.addColorStop(0.4, 'rgba(255,255,255,0.2)');
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, 64, 64);
+        } else if (type === 'spark') {
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(32, 32, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.5;
+          ctx.fillRect(28, 0, 8, 64);
+          ctx.fillRect(0, 28, 64, 8);
+        } else if (type === 'petal') {
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.moveTo(32, 60);
+          ctx.bezierCurveTo(10, 50, 0, 20, 25, 10);
+          ctx.bezierCurveTo(40, 5, 50, 15, 32, 25);
+          ctx.bezierCurveTo(45, 10, 64, 15, 55, 35);
+          ctx.bezierCurveTo(50, 50, 40, 55, 32, 60);
+          ctx.fill();
+          const g = ctx.createLinearGradient(10, 10, 50, 50);
+          g.addColorStop(0, 'rgba(255,255,255,0.9)');
+          g.addColorStop(1, 'rgba(255,255,255,0.5)');
+          ctx.globalCompositeOperation = 'source-atop';
+          ctx.fillStyle = g;
+          ctx.fill();
+        } else if (type === 'meteor') {
+          const g = ctx.createLinearGradient(60, 4, 4, 60);
+          g.addColorStop(0, 'rgba(255,255,255,1)');
+          g.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.moveTo(60, 4);
+          ctx.quadraticCurveTo(64, 0, 56, 12);
+          ctx.lineTo(4, 60);
+          ctx.lineTo(12, 56);
+          ctx.lineTo(60, 4);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(58, 6, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        return texture;
+      }
+
+      // --- 2. Configuration ---
+      const CONFIG = {
+        shardCount: 30000,
+        petalCount: 20000,
+        coreCount: 15000,
+        contourCount: 400,
+        debrisCount: 1500,
+        baseCount: 20000,
+        fireflyCount: 400,
+        roseStormCount: 5000,
+        shootingStarCount: 60,
+        colors: {
+          shardInner: new THREE.Color(0xff0033),
+          shardOuter: new THREE.Color(0xff2244),
+          petalInner: new THREE.Color(0xcc0022),
+          petalOuter: new THREE.Color(0xff5577),
+          core: new THREE.Color(0xff0011),
+          contour: new THREE.Color(0xff99aa),
+          blueBase: new THREE.Color(0x0066ff),
+          firefly: new THREE.Color(0xeaff30),
+          whiteStream: new THREE.Color(0xffffff),
+          meteor: new THREE.Color(0xe0ffff),
+          flyingRose: new THREE.Color(0xff0033),
+        },
+      };
+
+      // --- 3. Scene Components ---
+
+      const useHeartGeometry = (count, colorInner, colorOuter, sizeBase, sizeVar, isCore = false) => {
+        return useMemo(() => {
+          const pos = []; const col = []; const siz = []; const basePos = []; const baseSiz = [];
+          let attempts = 0; const maxAttempts = count * 5; let c = 0;
+
+          while (c < count && attempts < maxAttempts) {
+            attempts++;
+            let t = Math.random() * Math.PI * 2;
+            let r = isCore ? Math.pow(Math.random(), 0.5) * 1.0 : Math.pow(Math.random(), 0.33) * 1.55;
+
+            let x = 16 * Math.pow(Math.sin(t), 3);
+            let y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+            let z = (Math.random() - 0.5) * 8 * (1 - Math.abs(t - Math.PI) / Math.PI);
+
+            if (isCore) { x *= 0.8; y *= 0.8; z *= 0.6; }
+            x *= r; y *= r; z *= r;
+
+            // FIX: Relaxed center filtering
+            if (Math.abs(x) < 0.1) {
+                if (Math.random() < 0.8) continue;
+            }
+
+            pos.push(x, y, z); basePos.push(x, y, z);
+            const dist = Math.sqrt(x*x + y*y + z*z);
+            const mixRatio = Math.min(dist / 22, 1);
+            const finalColor = colorInner.clone().lerp(colorOuter, mixRatio);
+            col.push(finalColor.r, finalColor.g, finalColor.b);
+            const s = sizeBase + Math.random() * sizeVar;
+            siz.push(s); baseSiz.push(s);
+            c++;
+          }
+          return { positions: new Float32Array(pos), colors: new Float32Array(col), sizes: new Float32Array(siz), baseSizes: new Float32Array(baseSiz), basePositions: new Float32Array(basePos) };
+        }, [count, colorInner, colorOuter, sizeBase, sizeVar, isCore]);
+      };
+
+      const HeartLayer = ({ gestureRef, type, count, colorIn, colorOut, sizeBase, sizeVar, opacity, isCore = false }) => {
+        const meshRef = useRef(null);
+        const tex = useMemo(() => createParticleTexture(type), [type]);
+        const { positions, colors, sizes, baseSizes, basePositions } = useHeartGeometry(count, colorIn, colorOut, sizeBase, sizeVar, isCore);
+        const animState = useRef({ explode: 0, rotationY: 0, rotationX: 0, jumpScale: 1 });
+
+        useFrame(({ clock }) => {
+          if (!meshRef.current) return;
+          const time = clock.getElapsedTime();
+          const gesture = gestureRef.current;
+
+          animState.current.rotationY += (gesture.rotationTargetY - animState.current.rotationY) * 0.05;
+          animState.current.rotationX += (gesture.rotationTargetX - animState.current.rotationX) * 0.05;
+          meshRef.current.rotation.y = animState.current.rotationY + time * 0.1;
+          meshRef.current.rotation.x = animState.current.rotationX;
+
+          const pArray = meshRef.current.geometry.attributes.position.array;
+          let beat = 0; let jumpTarget = 1.0;
+          if (!gesture.isOpen) {
+              beat = Math.pow(Math.sin(time * 6), 63) * 0.8;
+              jumpTarget = 1.0 - (beat * 0.08); 
+          } else {
+              beat = Math.sin(time) * 0.05; jumpTarget = 1.0;
+          }
+          animState.current.jumpScale += (jumpTarget - animState.current.jumpScale) * 0.2;
+          meshRef.current.scale.setScalar(animState.current.jumpScale);
+
+          const targetExplode = gesture.isOpen ? 1.0 : 0; 
+          animState.current.explode += (targetExplode - animState.current.explode) * 0.05;
+          const spread = animState.current.explode * 5 * (type === 'petal' ? 2.0 : 1.0);
+
+          for (let i = 0; i < count; i++) {
+            const ix = i * 3;
+            const bx = basePositions[ix];
+            const by = basePositions[ix + 1];
+            const bz = basePositions[ix + 2];
+            const dist = Math.sqrt(bx*bx + by*by + bz*bz) || 1;
+            const noise = Math.sin(time * 1.5 + i) * 0.05;
+            const turbulence = gesture.isOpen ? Math.sin(time + bx * 0.2) * 0.3 : 0;
+            const beatOffset = beat * 2; 
+            pArray[ix] = bx + (bx/dist) * (beatOffset + spread) + noise + turbulence;
+            pArray[ix + 1] = by + (by/dist) * (beatOffset + spread) + noise + turbulence;
+            pArray[ix + 2] = bz + (bz/dist) * (beatOffset + spread) + noise;
+          }
+          meshRef.current.geometry.attributes.position.needsUpdate = true;
+        });
+
+        return (
+          <points ref={meshRef}>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+              <bufferAttribute attach="attributes-color" count={colors.length / 3} array={colors} itemSize={3} />
+              <bufferAttribute attach="attributes-size" count={sizes.length} array={sizes} itemSize={1} />
+            </bufferGeometry>
+            <pointsMaterial map={tex} vertexColors transparent opacity={opacity} blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation={true} alphaTest={0.01} />
+          </points>
+        );
+      }
+
+      const RoseStorm = ({ gestureRef }) => {
+        const meshRef = useRef(null);
+        const tex = useMemo(() => createParticleTexture('petal'), []);
+        const count = CONFIG.roseStormCount;
+        const { positions, initialAngles, radii, speeds, randomOffsets, sizes } = useMemo(() => {
+            const pos = new Float32Array(count * 3); const ang = new Float32Array(count);
+            const rad = new Float32Array(count); const spd = new Float32Array(count);
+            const ro = new Float32Array(count); const sz = new Float32Array(count);
+            for (let i = 0; i < count; i++) {
+                pos[i*3] = (Math.random()-0.5)*100; pos[i*3+1] = (Math.random()-0.5)*100; pos[i*3+2] = -250-Math.random()*200; 
+                ang[i] = Math.random()*Math.PI*2; rad[i] = 10+Math.random()*80; spd[i] = 1.5+Math.random()*3.0; ro[i] = Math.random();
+                sz[i] = Math.random()>0.8 ? 3.0+Math.random()*1.5 : 1.0+Math.random();
+            }
+            return { positions: pos, initialAngles: ang, radii: rad, speeds: spd, randomOffsets: ro, sizes: sz };
+        }, []);
+        useFrame(({ clock }) => {
+            if (!meshRef.current) return;
+            const time = clock.getElapsedTime();
+            const p = meshRef.current.geometry.attributes.position.array;
+            const isActive = gestureRef.current.isFingerHeart;
+            for (let i = 0; i < count; i++) {
+                const ix = i * 3;
+                if (isActive) {
+                    p[ix + 2] += speeds[i];
+                    const angle = initialAngles[i] + time * (1 + speeds[i] * 0.2) + p[ix + 2] * 0.01;
+                    const r = radii[i] + Math.sin(time * 3 + randomOffsets[i] * 10) * 8;
+                    p[ix] = Math.cos(angle) * r; p[ix + 1] = Math.sin(angle) * r;
+                    if (p[ix + 2] > 60) { p[ix + 2] = -250 - Math.random() * 100; initialAngles[i] = Math.random() * Math.PI * 2; }
+                } else {
+                    p[ix + 2] -= 0.5; p[ix] *= 1.02; p[ix+1] *= 1.02;
+                    if (p[ix + 2] < -400) p[ix + 2] = -400; 
+                }
+            }
+            meshRef.current.geometry.attributes.position.needsUpdate = true;
+        });
+        return (
+            <points ref={meshRef}>
+                <bufferGeometry>
+                    <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+                    <bufferAttribute attach="attributes-size" count={sizes.length} array={sizes} itemSize={1} />
+                </bufferGeometry>
+                <pointsMaterial map={tex} color={CONFIG.colors.flyingRose} transparent opacity={1.0} blending={THREE.NormalBlending} depthWrite={false} sizeAttenuation={true} />
+            </points>
+        );
+      };
+
+      const ShootingStars = () => {
+        const meshRef = useRef(null);
+        const tex = useMemo(() => createParticleTexture('meteor'), []); 
+        const { positions, velocities } = useMemo(() => {
+            const count = CONFIG.shootingStarCount;
+            const pos = new Float32Array(count * 3); const vel = new Float32Array(count);
+            for(let i=0; i<count; i++) {
+                pos[i*3] = Math.random()*300-50; pos[i*3+1] = Math.random()*200+50; pos[i*3+2] = -150-Math.random()*150; 
+                vel[i] = 4+Math.random()*5;
+            }
+            return { positions: pos, velocities: vel };
+        }, []);
+        useFrame(() => {
+            if (!meshRef.current) return;
+            const p = meshRef.current.geometry.attributes.position.array;
+            for (let i = 0; i < CONFIG.shootingStarCount; i++) {
+                const ix = i * 3;
+                p[ix] -= velocities[i] * 1.5; p[ix + 1] -= velocities[i];
+                if (p[ix + 1] < -150 || p[ix] < -300) {
+                    p[ix] = 100+Math.random()*250; p[ix + 1] = 100+Math.random()*200; p[ix + 2] = -150-Math.random()*150;
+                }
+            }
+            meshRef.current.geometry.attributes.position.needsUpdate = true;
+        });
+        return (
+            <points ref={meshRef}>
+                <bufferGeometry>
+                    <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+                </bufferGeometry>
+                <pointsMaterial map={tex} color={CONFIG.colors.meteor} size={25.0} transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation={true} />
+            </points>
+        );
+      };
+
+      const HeartMixedSystem = ({ gestureRef }) => (
+        <>
+          <HeartLayer gestureRef={gestureRef} type="spark" count={CONFIG.coreCount} colorIn={CONFIG.colors.core} colorOut={CONFIG.colors.shardInner} sizeBase={0.15} sizeVar={0.1} opacity={0.95} isCore={true} />
+          <HeartLayer gestureRef={gestureRef} type="shard" count={CONFIG.shardCount} colorIn={CONFIG.colors.shardInner} colorOut={CONFIG.colors.shardOuter} sizeBase={0.15} sizeVar={0.15} opacity={0.8} />
+          <HeartLayer gestureRef={gestureRef} type="petal" count={CONFIG.petalCount} colorIn={CONFIG.colors.petalInner} colorOut={CONFIG.colors.petalOuter} sizeBase={0.35} sizeVar={0.25} opacity={0.7} />
+        </>
+      );
+
+      const FireflyParticles = () => {
+        const meshRef = useRef(null);
+        const tex = useMemo(() => createParticleTexture('glow'), []);
+        const { positions, sizes, speeds, offsets } = useMemo(() => {
+          const pos = []; const siz = []; const spd = []; const off = [];
+          for (let i = 0; i < CONFIG.fireflyCount; i++) {
+            pos.push((Math.random()-0.5)*180, (Math.random()-0.5)*120, (Math.random()-0.5)*80);
+            siz.push(1.0); spd.push(Math.random()*0.1+0.05); off.push(Math.random()*100);
+          }
+          return { positions: new Float32Array(pos), sizes: new Float32Array(siz), speeds: new Float32Array(spd), offsets: new Float32Array(off) };
+        }, []);
+        useFrame(({ clock }) => {
+          if (!meshRef.current) return;
+          const time = clock.getElapsedTime();
+          const p = meshRef.current.geometry.attributes.position.array;
+          const s = meshRef.current.geometry.attributes.size.array;
+          for (let i = 0; i < CONFIG.fireflyCount; i++) {
+            const ix = i * 3;
+            p[ix + 2] += speeds[i]; p[ix] += Math.cos(time * 0.5 + offsets[i]) * 0.05; p[ix + 1] += Math.sin(time * 0.5 + offsets[i]) * 0.05;
+            if (p[ix + 2] > 60) { p[ix + 2] = -80; p[ix] = (Math.random()-0.5)*180; p[ix+1] = (Math.random()-0.5)*120; }
+            s[i] = (2.0 * (Math.sin(time * 2 + offsets[i]) * 0.3 + 0.7)); 
+          }
+          meshRef.current.geometry.attributes.position.needsUpdate = true;
+          meshRef.current.geometry.attributes.size.needsUpdate = true;
+        });
+        return (
+          <points ref={meshRef}>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" count={positions.length/3} array={positions} itemSize={3} />
+              <bufferAttribute attach="attributes-size" count={sizes.length} array={sizes} itemSize={1} />
+            </bufferGeometry>
+            <pointsMaterial map={tex} color={CONFIG.colors.firefly} transparent opacity={0.9} blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation={true} />
+          </points>
+        );
+      };
+
+      const FadePlane = () => {
+          const mesh = useRef(null);
+          const { camera } = useThree();
+          useFrame(() => {
+              if (mesh.current) {
+                  mesh.current.quaternion.copy(camera.quaternion);
+                  mesh.current.position.copy(camera.position);
+                  mesh.current.translateZ(-10);
+              }
+          });
+          return (
+              <mesh ref={mesh}>
+                  <planeGeometry args={[100, 100]} />
+                  <meshBasicMaterial color="black" transparent opacity={0.15} depthTest={false} depthWrite={false} />
+              </mesh>
+          )
+      }
+
+      const HologramScene = ({ gestureRef }) => {
+        return (
+          <div className="w-full h-full absolute inset-0 bg-black">
+            <Canvas
+              gl={{ preserveDrawingBuffer: true, antialias: false, powerPreference: "high-performance" }}
+              dpr={[1, 1.5]} 
+              camera={{ position: [0, 0, 90], fov: 60 }}
+              onCreated={({ gl }) => { gl.autoClear = false; gl.setClearColor('#000000'); }}
+            >
+              <color attach="background" args={['#000000']} />
+              <fog attach="fog" args={['#000000', 0.01]} />
+              <FadePlane />
+              <HeartMixedSystem gestureRef={gestureRef} />
+              <ShootingStars />
+              <RoseStorm gestureRef={gestureRef} />
+              <FireflyParticles />
+            </Canvas>
+          </div>
+        );
+      };
+
+      // --- 4. Gesture Controller ---
+      const GestureController = ({ gestureStateRef }) => {
+        const videoRef = useRef(null);
+        const canvasRef = useRef(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+
+        useEffect(() => {
+          if (!window.Hands || !window.Camera) {
+            setError("MediaPipe 库加载失败，请检查网络");
+            return;
+          }
+          const videoElement = videoRef.current;
+          const canvasElement = canvasRef.current;
+          if (!videoElement || !canvasElement) return;
+          const canvasCtx = canvasElement.getContext('2d');
+          
+          // Helper: Distance
+          const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+          const onResults = (results) => {
+            setLoading(false);
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.translate(canvasElement.width, 0);
+            canvasCtx.scale(-1, 1);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+              gestureStateRef.current.handDetected = true;
+              const landmarks = results.multiHandLandmarks[0];
+              const palmScale = dist(landmarks[0], landmarks[9]); 
+
+              // 1. Open/Close
+              const pinchDist = dist(landmarks[4], landmarks[12]);
+              gestureStateRef.current.isOpen = (pinchDist / palmScale > 0.6);
+
+              // 2. Thumbs Up (Trigger Rose Storm)
+              // Check curled fingers
+              const isIndexCurled = dist(landmarks[8], landmarks[0]) < dist(landmarks[5], landmarks[0]) * 1.2;
+              const isMiddleCurled = dist(landmarks[12], landmarks[0]) < dist(landmarks[9], landmarks[0]) * 1.2;
+              const isRingCurled = dist(landmarks[16], landmarks[0]) < dist(landmarks[13], landmarks[0]) * 1.2;
+              const isPinkyCurled = dist(landmarks[20], landmarks[0]) < dist(landmarks[17], landmarks[0]) * 1.2;
+              // Check thumb highest
+              const isThumbTipHighest = landmarks[4].y < landmarks[8].y && landmarks[4].y < landmarks[12].y;
+              const isThumbStraightUp = landmarks[4].y < landmarks[3].y;
+
+              if (isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled && isThumbTipHighest && isThumbStraightUp) {
+                  gestureStateRef.current.isFingerHeart = true;
+              } else {
+                  gestureStateRef.current.isFingerHeart = false;
+              }
+
+              // 3. Rotation
+              const handX = landmarks[9].x; 
+              const handY = landmarks[9].y;
+              gestureStateRef.current.rotationTargetY = (0.5 - handX) * 3; 
+              gestureStateRef.current.rotationTargetX = (handY - 0.5) * 2;
+
+              if (window.drawConnectors) {
+                window.drawConnectors(canvasCtx, landmarks, window.HAND_CONNECTIONS, { color: gestureStateRef.current.isFingerHeart ? '#00FFFF' : '#00FF00', lineWidth: 2 });
+              }
+            } else {
+              gestureStateRef.current.handDetected = false;
+              gestureStateRef.current.isOpen = true; 
+              gestureStateRef.current.isFingerHeart = false;
+            }
+            canvasCtx.restore();
+          };
+
+          const hands = new window.Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+          hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+          hands.onResults(onResults);
+          
+          const camera = new window.Camera(videoElement, {
+            onFrame: async () => { await hands.send({ image: videoElement }); },
+            width: 320, height: 240,
+          });
+          
+          camera.start().then(() => setLoading(false)).catch(e => {
+              console.error(e);
+              // Handle file:// protocol error specifically
+              if (window.location.protocol === 'file:') {
+                  setError("浏览器禁止在本地文件(file://)中访问摄像头。请使用 VS Code Live Server 或将文件上传到服务器。");
+              } else {
+                  setError("无法访问摄像头，请检查权限。");
+              }
+          });
+        }, [gestureStateRef]);
+
+        return (
+          <div className="absolute bottom-5 right-5 w-64 h-48 z-50 pointer-events-none">
+            <div className="relative w-full h-full border-2 border-pink-500/30 rounded-lg overflow-hidden bg-black/50 backdrop-blur-sm shadow-[0_0_20px_rgba(255,50,80,0.3)]">
+              {loading && <div className="absolute inset-0 flex items-center justify-center text-white/70 text-xs p-4 text-center">系统初始化中...<br/>(如果是本地打开，摄像头可能被拦截)</div>}
+              {error && <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 text-xs p-4 text-center bg-black/80 z-50"><AlertTriangle size={24} className="mb-2"/>{error}</div>}
+              <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover opacity-0" playsInline />
+              <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-cover" />
+              <div className="absolute top-2 left-2 flex items-center gap-2">
+                   <div className={`w-2 h-2 rounded-full ${loading ? 'bg-yellow-500' : 'bg-green-500'} animate-pulse`} />
+                   <span className="text-[10px] text-white/80 uppercase tracking-wider">VISION OS</span>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // --- 5. Main App ---
+      const defaultGestureState = { isOpen: true, isFingerHeart: false, rotationTargetY: 0, rotationTargetX: 0, handDetected: false };
+
+      function App() {
+        const gestureStateRef = useRef(defaultGestureState);
+        const [audioUrl, setAudioUrl] = useState(null);
+        const audioRef = useRef(null);
+
+        const handleFileChange = (e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            const url = URL.createObjectURL(file);
+            setAudioUrl(url);
+            if (audioRef.current) { audioRef.current.src = url; audioRef.current.play(); }
+          }
+        };
+
+        const toggleFullScreen = () => {
+          if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+          else document.exitFullscreen();
+        };
+
+        return (
+          <div className="relative w-screen h-screen bg-black overflow-hidden font-sans select-none">
+            <HologramScene gestureRef={gestureStateRef} />
+            <GestureController gestureStateRef={gestureStateRef} />
+            
+            <div className="absolute top-0 left-0 p-6 z-40 text-white pointer-events-none">
+              <h1 className="text-4xl font-light tracking-[0.2em] mb-2 text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-pink-500 drop-shadow-[0_0_10px_rgba(255,50,80,0.8)]">
+                永恒之心
+              </h1>
+              <p className="text-gray-400 text-sm font-light tracking-wide max-w-lg leading-relaxed">
+                张开手掌: <span className="text-pink-400">扩散 & 流动</span> • 
+                握拳: <span className="text-red-500">凝聚 & 跳动</span> • 
+                竖大拇指: <span className="text-red-600">玫瑰风暴</span> •
+                移动手掌: <span className="text-blue-400">旋转视角</span>
+              </p>
+              <div className="mt-6 flex gap-3 pointer-events-auto">
+                <label className="group flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full cursor-pointer hover:bg-red-500/20 hover:border-red-500/50 transition-all duration-300 backdrop-blur-md">
+                  <Music size={16} className="text-gray-300 group-hover:text-red-400" />
+                  <span className="text-sm text-gray-300 group-hover:text-white">上传音乐</span>
+                  <input type="file" accept="audio/*" onChange={handleFileChange} className="hidden" />
+                </label>
+                <button onClick={toggleFullScreen} className="group flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full cursor-pointer hover:bg-blue-500/20 hover:border-blue-500/50 transition-all duration-300 backdrop-blur-md">
+                  <Maximize size={16} className="text-gray-300 group-hover:text-blue-400" />
+                  <span className="text-sm text-gray-300 group-hover:text-white">全屏显示</span>
+                </button>
+              </div>
+            </div>
+            <audio ref={audioRef} loop />
+          </div>
+        );
+      }
+
+      const root = createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

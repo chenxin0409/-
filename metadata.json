@@ -1,0 +1,7 @@
+{
+  "name": "Eternal Heart Hologram",
+  "description": "Interactive holographic heart particle simulation controlled by hand gestures.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
